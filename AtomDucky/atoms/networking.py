@@ -50,6 +50,21 @@ class WebHost:
                 time.sleep(5)
                 self.start_web_server()
 
+    def _check_path(self, path):
+        """check if path is allowed"""
+        path = path.lstrip("/")
+        if not path:
+            return True
+        allowed = ["index.html"]
+        if path in allowed:
+            return True
+        if path.startswith("static/"):
+            return True
+        if path.startswith("atoms/website_atoms/"):
+            return True
+        return False
+        
+    
     def read_file_in_chunks(self, path, chunk_size=1024):
         try:
             with open(path, 'rb') as f:
@@ -148,16 +163,19 @@ class WebHost:
             if handler:
                 handler(client_socket, request)
             else:
-                content_type = self.get_content_type(file_path)
-                headers = f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\r\n".encode()
-                self.send_with_retry(client_socket, headers)
+                if self._check_path(file_path):
+                    content_type = self.get_content_type(file_path)
+                    headers = f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\r\n".encode()
+                    self.send_with_retry(client_socket, headers)
 
-                for chunk in self.read_file_in_chunks(file_path[1:]):
-                    if chunk is None:
-                        response = b"HTTP/1.1 404 Not Found\r\n\r\n"
-                        self.send_with_retry(client_socket, response)
-                        break
-                    self.send_with_retry(client_socket, chunk)
+                    for chunk in self.read_file_in_chunks(file_path[1:]):
+                        if chunk is None:
+                            response = b"HTTP/1.1 404 Not Found\r\n\r\n"
+                            self.send_with_retry(client_socket, response)
+                            break
+                        self.send_with_retry(client_socket, chunk)
+                else:
+                    self.send_with_retry(client_socket, b"HTTP/1.1 403 Forbidden\r\n\r\n")
             gc.collect()
         except OSError as e:
             print("OSError in handle_request", str(e))
