@@ -18,10 +18,13 @@ def button_pressed():
     return button.value
 
 class WebHost:
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, web_passwd):
         self.port = port
         self.ip = ip
         self.config = ConfigMan()
+        """variables for session authentication"""
+        self.tokens = set()
+        self.web_passwd = web_passwd or None
         self.start_web_server()
         pixel.fill(color("cyan"))
         self.run_web_loop()
