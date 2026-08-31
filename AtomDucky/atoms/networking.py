@@ -50,6 +50,11 @@ class WebHost:
                 time.sleep(5)
                 self.start_web_server()
 
+    def _generate_token(self):
+        token = os.urandom(32).hex()
+        self.tokens.add(token)
+        return token
+    
     def _check_path(self, path):
         """check if path is allowed"""
         path = path.lstrip("/")
