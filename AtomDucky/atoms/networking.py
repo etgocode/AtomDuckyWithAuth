@@ -53,10 +53,34 @@ class WebHost:
                 time.sleep(5)
                 self.start_web_server()
 
+    def _check_auth_required(self, path):
+        if self.web_passwd is None:
+            return False
+        if path.startswith("/login"):
+            return False
+        return True
+        
+    def _validate_token(self, token):
+        return token in self.tokens
+        
+    def _extract_token(self, request):
+        for line in request.splitlines():
+            if line.lower().startswith("x-auth-token:"):
+                return line.split(":", 1)[1].strip()
+                
+    
     def _generate_token(self):
         token = os.urandom(32).hex()
         self.tokens.add(token)
         return token
+        
+    def _is_authenticated(self, request, path):
+        if not self._check_auth_required(path):
+            return True
+        token = self._extract_token(request)
+        if token and self._validate_token(token):
+            return True
+        return False
     
     def _check_path(self, path):
         """check if path is allowed"""
