@@ -231,6 +231,33 @@ class WebHost:
 
         return headers, body.strip()
 
+    def _handle_login(self, client_socket, request):
+        lines = request.splitlines()
+        method, url, _ = lines[0].split(" ")
+        
+        if method != "POST":
+            self.send_with_retry(client_socket, b"HTTP/1.1 405 Method Not Allowed\r\n\r\n")
+            return
+        
+        headers, body = self.unpack_body_and_headers(lines)
+        password = body.strip()
+        
+        if password == self.web_passwd:
+            token = self._generate_token()
+            response = json.dumps({"success": True, "token": token})
+            status = "200 OK"
+        else:
+            response = json.dumps({"success": False, "error": "Invalid password"})
+            status = "401 Unauthorized"
+            
+        """send response"""
+        self.send_with_retry(client_socket, (f"HTTP/1.1 {status}\r\n").encode())
+        self.send_with_retry(client_socket, b"Content-Type: text/plain\r\n")
+        self.send_with_retry(client_socket, (f"Content-Length: {len(response)}\r\n").encode())
+        self.send_with_retry(client_socket, b"\r\n")
+        self.send_with_retry(client_socket, response.encode())
+        
+    
     def handle_restart(self, client_socket, req=None):
         print("Restarting...")
         import supervisor
