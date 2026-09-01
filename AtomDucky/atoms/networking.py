@@ -58,6 +58,8 @@ class WebHost:
             return False
         if path.startswith("/login"):
             return False
+        if path.startswith("/index.html"):
+            return False
         return True
         
     def _validate_token(self, token):
