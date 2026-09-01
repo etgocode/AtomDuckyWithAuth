@@ -177,6 +177,10 @@ class WebHost:
             if file_path == "/":
                 file_path = "/index.html"
 
+            if not self._is_authenticated(request, file_path):
+                self.send_with_retry(client_socket, b"HTTP/1.1 401 Unauthorized\r\n\r\n")
+                return
+            
             endpoint_handlers = {
                 "/modify_payload": self.handle_modify_payload,
                 "/handle_ble": self.handle_ble_callbacks,
@@ -186,6 +190,7 @@ class WebHost:
                 "/edit_config": self.handle_edit_config,
                 "/restart": self.handle_restart,
                 "/inject": self.handle_inject,
+                "/login": self._handle_login,
             }
 
             handler = None
