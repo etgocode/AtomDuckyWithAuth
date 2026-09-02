@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AtomDucky Login</title>
+</head>
+<body style="background: #1a1a2e; color: #00ff88; font-family: sans-serif;
+             display: flex; justify-content: center; align-items: center; 
+             height: 100vh; margin: 0;">
+    <div style="text-align: center;">
+        <h1>&#128272; AtomDucky Login</h1>
+		<form onsubmit="login(); return false;">
+        <input type="password" id="password" placeholder="Password"
+               style="padding: 15px; font-size: 18px; border-radius: 8px;
+                      border: 2px solid #00ff88; background: #16213e; color: white;">
+        <br>
+        <button type="submit" 
+                style="padding: 15px 30px; margin-top: 15px; background: #00ff88;
+                       border: none; border-radius: 8px; cursor: pointer;
+                       font-size: 16px; font-weight: bold;">
+            Login
+        </button>
+        <p id="error" style="color: #ff6b6b;"></p>
+    </div>
+    <script>
+        function login() {
+			fetch("/auth", {
+				method: "POST",
+				body: document.getElementById("password").value
+			})
+			.then(r => r.text())
+			.then(data => {
+				const result = JSON.parse(data);
+				if (result.success) {
+					window.location.href = "/index.html";
+				} else {
+					document.getElementById("error").textContent = result.error;
+				}
+			});
+		}
+    </script>
+</body>
+</html>

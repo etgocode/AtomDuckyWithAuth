@@ -18,10 +18,13 @@ def button_pressed():
     return button.value
 
 class WebHost:
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, web_passwd):
         self.port = port
         self.ip = ip
         self.config = ConfigMan()
+        """variables for session authentication"""
+        self.tokens = set()
+        self.web_passwd = web_passwd or None
         self.start_web_server()
         pixel.fill(color("cyan"))
         self.run_web_loop()
@@ -50,6 +53,55 @@ class WebHost:
                 time.sleep(5)
                 self.start_web_server()
 
+    def _check_auth_required(self, path):
+        if self.web_passwd is None:
+            return False
+        if path.startswith("/auth"):
+            return False
+        if path.startswith("/login.html"):
+            return False
+        return True
+        
+    def _validate_token(self, token):
+        return token in self.tokens
+        
+    def _extract_token(self, request):
+        for line in request.splitlines():
+            if line.lower().startswith("cookie:"):
+                for part in line.split(":"):
+                    if part.strip().startswith("token="):
+                        return part.split("=")[1].strip()
+        return None
+                
+    
+    def _generate_token(self):
+        token = os.urandom(32).hex()
+        self.tokens.add(token)
+        return token
+        
+    def _is_authenticated(self, request, path):
+        if not self._check_auth_required(path):
+            return True
+        token = self._extract_token(request)
+        if token and self._validate_token(token):
+            return True
+        return False
+    
+    def _check_path(self, path):
+        """check if path is allowed"""
+        path = path.lstrip("/")
+        if not path:
+            return True
+        allowed = ["index.html", "login.html", "atoms/_config"]
+        if path in allowed:
+            return True
+        if path.startswith("static/"):
+            return True
+        if path.startswith("atoms/website_atoms/"):
+            return True
+        return False
+        
+    
     def read_file_in_chunks(self, path, chunk_size=1024):
         try:
             with open(path, 'rb') as f:
@@ -128,6 +180,13 @@ class WebHost:
             if file_path == "/":
                 file_path = "/index.html"
 
+            if not self._is_authenticated(request, file_path):
+                if file_path == "/index.html":
+                    file_path = "/login.html"
+                else:
+                    self.send_with_retry(client_socket, b"HTTP/1.1 401 Unauthorized\r\n\r\n")
+                    return
+            
             endpoint_handlers = {
                 "/modify_payload": self.handle_modify_payload,
                 "/handle_ble": self.handle_ble_callbacks,
@@ -137,6 +196,7 @@ class WebHost:
                 "/edit_config": self.handle_edit_config,
                 "/restart": self.handle_restart,
                 "/inject": self.handle_inject,
+                "/auth": self._handle_auth,
             }
 
             handler = None
@@ -148,16 +208,19 @@ class WebHost:
             if handler:
                 handler(client_socket, request)
             else:
-                content_type = self.get_content_type(file_path)
-                headers = f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\r\n".encode()
-                self.send_with_retry(client_socket, headers)
+                if self._check_path(file_path):
+                    content_type = self.get_content_type(file_path)
+                    headers = f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\r\n".encode()
+                    self.send_with_retry(client_socket, headers)
 
-                for chunk in self.read_file_in_chunks(file_path[1:]):
-                    if chunk is None:
-                        response = b"HTTP/1.1 404 Not Found\r\n\r\n"
-                        self.send_with_retry(client_socket, response)
-                        break
-                    self.send_with_retry(client_socket, chunk)
+                    for chunk in self.read_file_in_chunks(file_path[1:]):
+                        if chunk is None:
+                            response = b"HTTP/1.1 404 Not Found\r\n\r\n"
+                            self.send_with_retry(client_socket, response)
+                            break
+                        self.send_with_retry(client_socket, chunk)
+                else:
+                    self.send_with_retry(client_socket, b"HTTP/1.1 403 Forbidden\r\n\r\n")
             gc.collect()
         except OSError as e:
             print("OSError in handle_request", str(e))
@@ -181,6 +244,36 @@ class WebHost:
 
         return headers, body.strip()
 
+    def _handle_auth(self, client_socket, request):
+        lines = request.splitlines()
+        method, url, _ = lines[0].split(" ")
+        
+        if method != "POST":
+            self.send_with_retry(client_socket, b"HTTP/1.1 405 Method Not Allowed\r\n\r\n")
+            return
+        
+        headers, body = self.unpack_body_and_headers(lines)
+        password = body.strip()
+        
+        if password == self.web_passwd:
+            token = self._generate_token()
+            response = json.dumps({"success": True})
+            status = "200 OK"
+            cookie = "Set-Cookie: token=%s; Path=/" % token
+        else:
+            response = json.dumps({"success": False, "error": "Invalid password"})
+            status = "401 Unauthorized"
+            cookie = "Set-Cookie: token=; Path=/; Max-Age=0"
+            
+        """send response"""
+        self.send_with_retry(client_socket, (f"HTTP/1.1 {status}\r\n").encode())
+        self.send_with_retry(client_socket, (f"{cookie}\r\n").encode())
+        self.send_with_retry(client_socket, b"Content-Type: text/plain\r\n")
+        self.send_with_retry(client_socket, (f"Content-Length: {len(response)}\r\n").encode())
+        self.send_with_retry(client_socket, b"\r\n")
+        self.send_with_retry(client_socket, response.encode())
+        
+    
     def handle_restart(self, client_socket, req=None):
         print("Restarting...")
         import supervisor
@@ -311,7 +404,7 @@ class WebHost:
             if method == 'POST':
                 try:
                     config_updates = json.loads(body)
-                    valid_fields = {"IP", "SSID", "PASSW", "AP", "MODE"}
+                    valid_fields = {"IP", "SSID", "PASSW", "AP", "MODE", "WEB_PASSWD"}
                     if not all(field in valid_fields for field in config_updates.keys()):
                         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid field in request body."
                     else:

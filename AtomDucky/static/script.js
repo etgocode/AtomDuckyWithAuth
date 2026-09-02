@@ -4,17 +4,19 @@ let MODE = '';
 let SSID = '';
 let PASSW = '';
 let AP = '';
+let WEB_PASSWD = '';
 let retryCount = 3;
 let currentTemplate = '';
 
 let currentIndex = 0;
-let setupData = {"IP": '', "SSID": '', "PASSW": '', "MODE": "", "AP": ""};
+let setupData = {"IP": '', "SSID": '', "PASSW": '', "MODE": "", "AP": "", "WEB_PASSWD": ''};
 let setupDataItems = {
     "IP": "10.0.0.15", 
     "SSID": "Atom Ducky", 
     "Password": '', 
     "Device Mode": 'NORMAL', 
-    "Access Point Mode": 'TRUE'
+    "Access Point Mode": 'TRUE',
+	"Web-UI Password": ''
 };
 
 let settingsDefaults = {
@@ -22,7 +24,8 @@ let settingsDefaults = {
     "SSID": SSID, 
     "Password": PASSW, 
     "Device Mode": MODE, 
-    "Access Point Mode": AP    
+    "Access Point Mode": AP,
+	"Web-UI Password": WEB_PASSWD
 };
 
 const setupKeys = Object.keys(setupData);
@@ -51,6 +54,9 @@ async function readConfig() {
             if (key === 'MODE') {
                 MODE = value.trim();
             }
+			if (key === 'WEB_PASSWD') {
+				WEB_PASSWD = value.trim();
+			}
         }
 
         // Update settingsDefaults with the values from the config
@@ -59,7 +65,8 @@ async function readConfig() {
             "SSID": SSID, 
             "Password": PASSW, 
             "Device Mode": MODE, 
-            "Access Point Mode": AP    
+            "Access Point Mode": AP,
+			"Web-UI Password": WEB_PASSWD
         };
 
         // Call createSettingsRows after readConfig has populated the config values
@@ -186,15 +193,15 @@ function saveSettings() {
     setupKeys.forEach((key, index) => {
         const inputElement = document.getElementById(`settings-card-input-${index}`);
         const value = inputElement.value.trim();
-        if (value !== '' || key === 'PASSW') {
+        if (value !== '' || key === 'PASSW' || key === 'WEB_PASSWD') {
             setupData[key] = value;
         }
     });
 
     const filteredSetupData = Object.fromEntries(
-        Object.entries(setupData).filter(([key, value]) => value.trim() !== '' || key === 'PASSW')
+        Object.entries(setupData).filter(([key, value]) => value.trim() !== '' || key === 'PASSW' || key === 'WEB_PASSWD')
     );
-
+	
     fetch('/edit_config', {
         method: 'POST',
         headers: {
@@ -246,7 +253,7 @@ function nextItem() {
 
 function saveSetup() {
     const filteredSetupData = Object.fromEntries(
-        Object.entries(setupData).filter(([key, value]) => value.trim() !== '' || key === 'PASSW')
+        Object.entries(setupData).filter(([key, value]) => value.trim() !== '' || key === 'PASSW' || key === 'WEB_PASSWD')
     );
 
     fetch('/edit_config', {
