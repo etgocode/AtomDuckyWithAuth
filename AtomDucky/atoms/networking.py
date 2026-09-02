@@ -92,7 +92,7 @@ class WebHost:
         path = path.lstrip("/")
         if not path:
             return True
-        allowed = ["index.html", "login.html"]
+        allowed = ["index.html", "login.html", "atoms/_config"]
         if path in allowed:
             return True
         if path.startswith("static/"):
@@ -404,7 +404,7 @@ class WebHost:
             if method == 'POST':
                 try:
                     config_updates = json.loads(body)
-                    valid_fields = {"IP", "SSID", "PASSW", "AP", "MODE"}
+                    valid_fields = {"IP", "SSID", "PASSW", "AP", "MODE", "WEB_PASSWD"}
                     if not all(field in valid_fields for field in config_updates.keys()):
                         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid field in request body."
                     else:
