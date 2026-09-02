@@ -67,8 +67,11 @@ class WebHost:
         
     def _extract_token(self, request):
         for line in request.splitlines():
-            if line.lower().startswith("x-auth-token:"):
-                return line.split(":", 1)[1].strip()
+            if line.lower().startswith("cookie:"):
+                for part in line.split(":"):
+                    if part.strip().startswith("token="):
+                        return part.split("=")[1].strip()
+        return None
                 
     
     def _generate_token(self):
@@ -251,14 +254,17 @@ class WebHost:
         
         if password == self.web_passwd:
             token = self._generate_token()
-            response = json.dumps({"success": True, "token": token})
+            response = json.dumps({"success": True})
             status = "200 OK"
+            cookie = "Set-Cookie: token=%s; Path=/" % token
         else:
             response = json.dumps({"success": False, "error": "Invalid password"})
             status = "401 Unauthorized"
+            cookie = "Set-Cookie: token=; Path=/; Max-Age=0"
             
         """send response"""
         self.send_with_retry(client_socket, (f"HTTP/1.1 {status}\r\n").encode())
+        self.send_with_retry(client_socket, (f"{cookie}\r\n").encode())
         self.send_with_retry(client_socket, b"Content-Type: text/plain\r\n")
         self.send_with_retry(client_socket, (f"Content-Length: {len(response)}\r\n").encode())
         self.send_with_retry(client_socket, b"\r\n")
