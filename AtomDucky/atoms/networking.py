@@ -56,9 +56,9 @@ class WebHost:
     def _check_auth_required(self, path):
         if self.web_passwd is None:
             return False
-        if path.startswith("/login"):
+        if path.startswith("/auth"):
             return False
-        if path.startswith("/index.html"):
+        if path.startswith("/login.html"):
             return False
         return True
         
@@ -92,7 +92,7 @@ class WebHost:
         path = path.lstrip("/")
         if not path:
             return True
-        allowed = ["index.html"]
+        allowed = ["index.html", "login.html"]
         if path in allowed:
             return True
         if path.startswith("static/"):
@@ -181,8 +181,11 @@ class WebHost:
                 file_path = "/index.html"
 
             if not self._is_authenticated(request, file_path):
-                self.send_with_retry(client_socket, b"HTTP/1.1 401 Unauthorized\r\n\r\n")
-                return
+                if file_path == "/index.html":
+                    file_path = "/login.html"
+                else:
+                    self.send_with_retry(client_socket, b"HTTP/1.1 401 Unauthorized\r\n\r\n")
+                    return
             
             endpoint_handlers = {
                 "/modify_payload": self.handle_modify_payload,
@@ -193,7 +196,7 @@ class WebHost:
                 "/edit_config": self.handle_edit_config,
                 "/restart": self.handle_restart,
                 "/inject": self.handle_inject,
-                "/login": self._handle_login,
+                "/auth": self._handle_auth,
             }
 
             handler = None
@@ -241,7 +244,7 @@ class WebHost:
 
         return headers, body.strip()
 
-    def _handle_login(self, client_socket, request):
+    def _handle_auth(self, client_socket, request):
         lines = request.splitlines()
         method, url, _ = lines[0].split(" ")
         
