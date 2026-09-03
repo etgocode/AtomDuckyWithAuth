@@ -27,6 +27,8 @@ class WebHost:
         self.web_passwd = web_passwd or None
         self.start_web_server()
         pixel.fill(color("cyan"))
+        # don't leak secrets from requests in log if auth is enabled
+        self.log_requests = self.web_passwd is None
         self.run_web_loop()
 
     def start_web_server(self):
@@ -173,7 +175,7 @@ class WebHost:
         try:
 
             request = self.read_full_request(client_socket)
-            print("Request:", request)
+            self.__debug_print("Request:", request)
 
             request_line = request.splitlines()[0]
             method, file_path, _ = request_line.split(" ")
@@ -297,8 +299,8 @@ class WebHost:
         method, url, _ = request_lines[0].split(" ")
         headers, body = self.unpack_body_and_headers(request_lines)
         
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'POST':
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nOk, but why POST Method?"
         elif method == 'GET':
@@ -312,8 +314,8 @@ class WebHost:
         method, url, _ = request_lines[0].split(" ")
         headers, body = self.unpack_body_and_headers(request_lines)
     
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'POST':
             if body == "start_ble_spam_ios":
                 pixel.fill(color("green"))
@@ -335,8 +337,8 @@ class WebHost:
         method, url, _ = request_lines[0].split(" ")
         headers, body = self.unpack_body_and_headers(request_lines)
     
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'POST':
             print("Injecting...")
             ducky = AtomDucky()
@@ -355,8 +357,8 @@ class WebHost:
         params = dict(param.split('=') for param in query.split('&'))
         headers, body = self.unpack_body_and_headers(request_lines)
 
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'GET' and params.get('action') == 'read_list':
             file_list = os.listdir('/atoms/templates')
             if ".gitkeep" in file_list:
@@ -383,8 +385,8 @@ class WebHost:
 
         headers, body = self.unpack_body_and_headers(request_lines)
 
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'GET' and params.get('action') == 'read':
             self.read_payload(client_socket)
         elif method == 'POST' and params.get('action') == 'write':
@@ -398,8 +400,8 @@ class WebHost:
             path, _, query = url.partition('?')
             headers, body = self.unpack_body_and_headers(request_lines)
 
-            print("Headers:", headers)
-            print("Body:", body)
+            self.__debug_print("Headers:", headers)
+            self.__debug_print("Body:", body)
             
             if method == 'POST':
                 try:
@@ -449,3 +451,6 @@ class WebHost:
                 client_socket, addr = self.server_socket.accept()
                 print("Client connected from", addr)
                 self.handle_request(client_socket)
+    def __debug_print(self, *args, **kwargs):
+        if self.log_requests:
+            print(*args, **kwargs)
