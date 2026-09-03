@@ -175,6 +175,8 @@ class WebHost:
         try:
 
             request = self.read_full_request(client_socket)
+            if not request:
+                return  # client closed without sending a request
             self.__debug_print("Request:", request)
 
             request_line = request.splitlines()[0]
