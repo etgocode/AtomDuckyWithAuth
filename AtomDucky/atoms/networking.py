@@ -7,6 +7,7 @@ import sys
 import os
 import json
 import errno
+import select
 
 from atoms.hid import AtomDucky, load_payload_from_file
 from atoms.config_man import ConfigMan
@@ -460,11 +461,30 @@ class WebHost:
             response = f"HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nError writing payload: {str(e)}"
         self.send_with_retry(client_socket, response.encode())
 
-    def run_web_loop(self): 
-            while True:
-                client_socket, addr = self.server_socket.accept()
-                print("Client connected from", addr)
-                self.handle_request(client_socket)
+    def _accept_and_handle(self, listener):
+        """Accept a connection and serve it."""
+        gc.collect()  # reclaim garbage before the (possibly TLS) handshake allocates much memory
+        # if TLS, handshake happens here, which can fail
+        try:
+            client_socket, addr = listener.accept()
+        except Exception as e:
+            print("Accept failed:", repr(e))
+            return
+        print("Client connected from", addr)
+        self.handle_request(client_socket)
+
+    def run_web_loop(self):
+        # CircuitPython's poll() returns the registered objects, not fds
+        self._listeners = [self.server_socket]
+
+        poller = select.poll()
+        for listener in self._listeners:
+            poller.register(listener, select.POLLIN)
+
+        while True:
+            for listener, _ in poller.poll():
+                self._accept_and_handle(listener)
+
     def __debug_print(self, *args, **kwargs):
         if self.log_requests:
             print(*args, **kwargs)
