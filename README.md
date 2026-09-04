@@ -372,6 +372,8 @@ openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -node
 > - Browsers will warn about the self-signed certificate - accept the risk to continue.
 > - TLS 1.2 is supported on all builds; TLS 1.3 is negotiated automatically on newer CircuitPython builds (mbedTLS 4.x).
 
+If Atom Ducky crashes when accessed via HTTPS the available RAM might not be sufficient. Switch to the `AtomDucky_no_ble` version to free up the memory used by the BLE functionality.
+
 # Usage
 
 After plugging the Atom Ducky into a device supporting HID (computer, smartphone etc.), we want to open the web interface (open web browser and go to the IP address of Atom Ducky).
