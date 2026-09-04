@@ -8,6 +8,7 @@ import os
 import json
 import errno
 import select
+import ssl
 
 from atoms.hid import AtomDucky, load_payload_from_file
 from atoms.config_man import ConfigMan
@@ -17,6 +18,16 @@ from atoms.colors import color
 
 EAGAIN_BLOCK_TIME = 0.01
 "seconds to wait when socket would block"
+
+CERT_FILE = "/atoms/cert.pem"
+KEY_FILE = "/atoms/key.pem"
+TLS_PORT = 443
+
+
+def file_exists(path):
+    """CircuitPython has no os.path, so check existence via listdir() like code.py does."""
+    folder, _, name = path.rpartition("/")
+    return name in os.listdir(folder)
 
 
 def button_pressed():
@@ -30,7 +41,12 @@ class WebHost:
         """variables for session authentication"""
         self.tokens = set()
         self.web_passwd = web_passwd or None
+        self.tls_enabled = file_exists(CERT_FILE) and file_exists(KEY_FILE)
+        self.tls_context = None
+        self.tls_socket = None
         self.start_web_server()
+        if self.tls_enabled:
+            self.start_tls_server()
         pixel.fill(color("cyan"))
         # don't leak secrets from requests in log if auth is enabled
         self.log_requests = self.web_passwd is None
@@ -59,6 +75,34 @@ class WebHost:
                 self.server_socket.close()
                 time.sleep(5)
                 self.start_web_server()
+
+    def start_tls_server(self):
+        """Start an HTTPS listener on port {TLS_PORT} using {CERT_FILE} and {KEY_FILE}.
+        If anything goes wrong (missing/invalid cert, no memory, ...) we log the error
+        and keep serving plain HTTP on port 80."""
+        try:
+            self.tls_context = ssl.create_default_context()
+            # clear CA bundle to save memory
+            self.tls_context.load_verify_locations(cadata="")
+            self.tls_context.load_cert_chain(CERT_FILE, KEY_FILE)
+            tls_socket = self.pool.socket(self.pool.AF_INET, self.pool.SOCK_STREAM)
+            tls_socket.setsockopt(self.pool.SOL_SOCKET, self.pool.SO_REUSEADDR, 1)
+            tls_socket.bind((str(self.ip), TLS_PORT))
+            tls_socket.listen(5)
+            tls_socket.settimeout(None)
+            # wrap the LISTENING socket: accept() now returns handshaken SSLSockets
+            self.tls_socket = self.tls_context.wrap_socket(tls_socket, server_side=True)
+            print(f"Listening on https://{self.ip}:{TLS_PORT}")
+        except Exception as e:
+            print("TLS setup failed, continuing with HTTP only:", repr(e))
+            self.tls_enabled = False
+            self.tls_context = None
+            if self.tls_socket is not None:
+                try:
+                    self.tls_socket.close()
+                except Exception:
+                    pass
+                self.tls_socket = None
 
     def _check_auth_required(self, path):
         if self.web_passwd is None:
@@ -476,6 +520,8 @@ class WebHost:
     def run_web_loop(self):
         # CircuitPython's poll() returns the registered objects, not fds
         self._listeners = [self.server_socket]
+        if self.tls_socket is not None:
+            self._listeners.append(self.tls_socket)
 
         poller = select.poll()
         for listener in self._listeners:
