@@ -5,6 +5,7 @@ class ConfigMan:
         self.passw = kwargs.get('passw', '')
         self.mode = kwargs.get('mode', 'NORMAL')
         self.ap = kwargs.get('ap', 'TRUE')
+        self.web_passwd = kwargs.get('web_passwd', '')
 
     def write_config(self):
         try:
@@ -14,6 +15,7 @@ SSID={self.ssid}
 PASSW={self.passw}
 MODE={self.mode}
 AP={self.ap}
+WEB_PASSWD={self.web_passwd}
 """)
                 print("Successfully saved the config!")
         except Exception as e:
@@ -45,5 +47,6 @@ AP={self.ap}
         self.passw = config_dict.get('PASSW', self.passw)
         self.mode = config_dict.get('MODE', self.mode)
         self.ap = config_dict.get('AP', self.ap)
+        self.web_passwd = config_dict.get('WEB_PASSWD', self.web_passwd)
         self.write_config()
         print("Successfully modified the config!")

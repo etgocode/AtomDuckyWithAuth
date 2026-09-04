@@ -15,12 +15,13 @@ from atoms.colors import color
 pixel.fill(color("yellow"))
 
 class AP:
-    def __init__(self, ssid="Atom Ducky", passw="", ap='TRUE', ip="10.0.0.15", mode="NORMAL"):
+    def __init__(self, ssid="Atom Ducky", passw="", ap='TRUE', ip="10.0.0.15", mode="NORMAL", web_passwd=""):
         self.ssid = ssid
         self.password = passw
         self.ip = ip
         self.ap = ap
         self.mode = mode
+        self.web_passwd = web_passwd
         self.config = ConfigMan()
         self.run()
         
@@ -37,6 +38,8 @@ class AP:
                 self.mode = value
             elif key == 'AP':
                 self.ap = value
+            elif key == 'WEB_PASSWD':
+                self.web_passwd = value
     
     def run(self):
         try:
@@ -64,13 +67,13 @@ AP: {self.ap}
             self.start_host_ap()
 
         if not cfg_exists:
-            self.config = ConfigMan(ip=self.ip, ssid=self.ssid, passw=self.password, mode=self.mode, ap=self.ap)
+            self.config = ConfigMan(ip=self.ip, ssid=self.ssid, passw=self.password, mode=self.mode, ap=self.ap, web_passwd=self.web_passwd)
             self.config.write_config()
 
         self.config.edit_config(ip=self.ip)
         print(f"Changed the _config IP to: {self.ip}")
 
-        webserver = WebHost(ip=self.ip, port=80)
+        webserver = WebHost(ip=self.ip, port=80, web_passwd=self.web_passwd)
     
     def rubber_mode_exec(self):
         if self.mode == "RUBBER":

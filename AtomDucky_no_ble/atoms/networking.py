@@ -7,22 +7,48 @@ import sys
 import os
 import json
 import errno
+import select
+import ssl
 
 from atoms.hid import AtomDucky, load_payload_from_file
 from atoms.config_man import ConfigMan
 from atoms.buttons import button, pixel
 from atoms.colors import color
 
+EAGAIN_BLOCK_TIME = 0.01
+"seconds to wait when socket would block"
+
+CERT_FILE = "/atoms/cert.pem"
+KEY_FILE = "/atoms/key.pem"
+TLS_PORT = 443
+
+
+def file_exists(path):
+    """CircuitPython has no os.path, so check existence via listdir() like code.py does."""
+    folder, _, name = path.rpartition("/")
+    return name in os.listdir(folder)
+
+
 def button_pressed():
     return button.value
 
 class WebHost:
-    def __init__(self, ip, port):
+    def __init__(self, ip, port, web_passwd):
         self.port = port
         self.ip = ip
         self.config = ConfigMan()
+        """variables for session authentication"""
+        self.tokens = set()
+        self.web_passwd = web_passwd or None
+        self.tls_enabled = file_exists(CERT_FILE) and file_exists(KEY_FILE)
+        self.tls_context = None
+        self.tls_socket = None
         self.start_web_server()
+        if self.tls_enabled:
+            self.start_tls_server()
         pixel.fill(color("cyan"))
+        # don't leak secrets from requests in log if auth is enabled
+        self.log_requests = self.web_passwd is None
         self.run_web_loop()
 
     def start_web_server(self):
@@ -48,6 +74,83 @@ class WebHost:
                 self.server_socket.close()
                 time.sleep(5)
                 self.start_web_server()
+
+    def start_tls_server(self):
+        """Start an HTTPS listener on port {TLS_PORT} using {CERT_FILE} and {KEY_FILE}.
+        If anything goes wrong (missing/invalid cert, no memory, ...) we log the error
+        and keep serving plain HTTP on port 80."""
+        try:
+            self.tls_context = ssl.create_default_context()
+            # clear CA bundle to save memory
+            self.tls_context.load_verify_locations(cadata="")
+            self.tls_context.load_cert_chain(CERT_FILE, KEY_FILE)
+            tls_socket = self.pool.socket(self.pool.AF_INET, self.pool.SOCK_STREAM)
+            tls_socket.setsockopt(self.pool.SOL_SOCKET, self.pool.SO_REUSEADDR, 1)
+            tls_socket.bind((str(self.ip), TLS_PORT))
+            tls_socket.listen(5)
+            tls_socket.settimeout(None)
+            # wrap the LISTENING socket: accept() now returns handshaken SSLSockets
+            self.tls_socket = self.tls_context.wrap_socket(tls_socket, server_side=True)
+            print(f"Listening on https://{self.ip}:{TLS_PORT}")
+        except Exception as e:
+            print("TLS setup failed, continuing with HTTP only:", repr(e))
+            self.tls_enabled = False
+            self.tls_context = None
+            if self.tls_socket is not None:
+                try:
+                    self.tls_socket.close()
+                except Exception:
+                    pass
+                self.tls_socket = None
+
+    def _check_auth_required(self, path):
+        if self.web_passwd is None:
+            return False
+        if path.startswith("/auth"):
+            return False
+        if path.startswith("/login.html"):
+            return False
+        return True
+        
+    def _validate_token(self, token):
+        return token in self.tokens
+        
+    def _extract_token(self, request):
+        for line in request.splitlines():
+            if line.lower().startswith("cookie:"):
+                for part in line.split(":"):
+                    if part.strip().startswith("token="):
+                        return part.split("=")[1].strip()
+        return None
+                
+
+    def _generate_token(self):
+        token = os.urandom(32).hex()
+        self.tokens.add(token)
+        return token
+        
+    def _is_authenticated(self, request, path):
+        if not self._check_auth_required(path):
+            return True
+        token = self._extract_token(request)
+        if token and self._validate_token(token):
+            return True
+        return False
+
+    def _check_path(self, path):
+        """check if path is allowed"""
+        path = path.lstrip("/")
+        if not path:
+            return True
+        allowed = ["index.html", "login.html", "atoms/_config"]
+        if path in allowed:
+            return True
+        if path.startswith("static/"):
+            return True
+        if path.startswith("atoms/website_atoms/"):
+            return True
+        return False
+        
 
     def read_file_in_chunks(self, path, chunk_size=1024):
         try:
@@ -80,10 +183,11 @@ class WebHost:
                 data = data[sent:]
             except OSError as e:
                 if e.errno == errno.EAGAIN:
+                    # socket blocks, wait a bit and retry
+                    time.sleep(EAGAIN_BLOCK_TIME)
                     continue
-                else:
-                    raise
-    
+                raise
+
     def read_full_request(self, client_socket):
         buf = bytearray(1024)
         request_bytes = bytearray()
@@ -92,7 +196,14 @@ class WebHost:
         body_bytes_read = 0
 
         while True:
-            received = client_socket.recv_into(buf)
+            try:
+                received = client_socket.recv_into(buf)
+            except OSError as e:
+                if e.errno == errno.EAGAIN:
+                    # socket blocks, wait a bit and retry
+                    time.sleep(EAGAIN_BLOCK_TIME)
+                    continue
+                raise
             if received == 0:
                 break
             request_bytes.extend(buf[:received])
@@ -115,17 +226,26 @@ class WebHost:
                 break
 
         return request_bytes.decode()
-    
+
     def handle_request(self, client_socket):
         try:
             request = self.read_full_request(client_socket)
-            print("Request:", request)
+            if not request:
+                return  # client closed without sending a request
+            self.__debug_print("Request:", request)
 
             request_line = request.splitlines()[0]
             method, file_path, _ = request_line.split(" ")
             if file_path == "/":
                 file_path = "/index.html"
 
+            if not self._is_authenticated(request, file_path):
+                if file_path == "/index.html":
+                    file_path = "/login.html"
+                else:
+                    self.send_with_retry(client_socket, b"HTTP/1.1 401 Unauthorized\r\n\r\n")
+                    return
+            
             endpoint_handlers = {
                 "/modify_payload": self.handle_modify_payload,
                 "/file_manager": self.handle_file_manager,
@@ -134,6 +254,7 @@ class WebHost:
                 "/edit_config": self.handle_edit_config,
                 "/restart": self.handle_restart,
                 "/inject": self.handle_inject,
+                "/auth": self._handle_auth,
             }
 
             handler = None
@@ -145,16 +266,19 @@ class WebHost:
             if handler:
                 handler(client_socket, request)
             else:
-                content_type = self.get_content_type(file_path)
-                headers = f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\r\n".encode()
-                self.send_with_retry(client_socket, headers)
+                if self._check_path(file_path):
+                    content_type = self.get_content_type(file_path)
+                    headers = f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n\r\n".encode()
+                    self.send_with_retry(client_socket, headers)
 
-                for chunk in self.read_file_in_chunks(file_path[1:]):
-                    if chunk is None:
-                        response = b"HTTP/1.1 404 Not Found\r\n\r\n"
-                        self.send_with_retry(client_socket, response)
-                        break
-                    self.send_with_retry(client_socket, chunk)
+                    for chunk in self.read_file_in_chunks(file_path[1:]):
+                        if chunk is None:
+                            response = b"HTTP/1.1 404 Not Found\r\n\r\n"
+                            self.send_with_retry(client_socket, response)
+                            break
+                        self.send_with_retry(client_socket, chunk)
+                else:
+                    self.send_with_retry(client_socket, b"HTTP/1.1 403 Forbidden\r\n\r\n")
             gc.collect()
         except OSError as e:
             print("OSError in handle_request", str(e))
@@ -177,6 +301,36 @@ class WebHost:
                 headers[key] = value
 
         return headers, body.strip()
+
+    def _handle_auth(self, client_socket, request):
+        lines = request.splitlines()
+        method, url, _ = lines[0].split(" ")
+        
+        if method != "POST":
+            self.send_with_retry(client_socket, b"HTTP/1.1 405 Method Not Allowed\r\n\r\n")
+            return
+        
+        headers, body = self.unpack_body_and_headers(lines)
+        password = body.strip()
+        
+        if password == self.web_passwd:
+            token = self._generate_token()
+            response = json.dumps({"success": True})
+            status = "200 OK"
+            cookie = "Set-Cookie: token=%s; Path=/" % token
+        else:
+            response = json.dumps({"success": False, "error": "Invalid password"})
+            status = "401 Unauthorized"
+            cookie = "Set-Cookie: token=; Path=/; Max-Age=0"
+            
+        """send response"""
+        self.send_with_retry(client_socket, (f"HTTP/1.1 {status}\r\n").encode())
+        self.send_with_retry(client_socket, (f"{cookie}\r\n").encode())
+        self.send_with_retry(client_socket, b"Content-Type: text/plain\r\n")
+        self.send_with_retry(client_socket, (f"Content-Length: {len(response)}\r\n").encode())
+        self.send_with_retry(client_socket, b"\r\n")
+        self.send_with_retry(client_socket, response.encode())
+        
 
     def handle_restart(self, client_socket, req=None):
         print("Restarting...")
@@ -201,8 +355,8 @@ class WebHost:
         method, url, _ = request_lines[0].split(" ")
         headers, body = self.unpack_body_and_headers(request_lines)
         
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'POST':
             response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nOk, but why POST Method?"
         elif method == 'GET':
@@ -215,9 +369,9 @@ class WebHost:
         request_lines = request.splitlines()
         method, url, _ = request_lines[0].split(" ")
         headers, body = self.unpack_body_and_headers(request_lines)
-    
-        print("Headers:", headers)
-        print("Body:", body)
+
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'POST':
             print("Injecting...")
             ducky = AtomDucky()
@@ -228,7 +382,7 @@ class WebHost:
             if payload is not None:
                 ducky.payloads_write(payload, skip_release=True)
             gc.collect()   
-    
+
     def handle_ret_templates(self, client_socket, request):
         request_lines = request.splitlines()
         method, url, _ = request_lines[0].split(" ")
@@ -236,8 +390,8 @@ class WebHost:
         params = dict(param.split('=') for param in query.split('&'))
         headers, body = self.unpack_body_and_headers(request_lines)
 
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'GET' and params.get('action') == 'read_list':
             file_list = os.listdir('/atoms/templates')
             if ".gitkeep" in file_list:
@@ -264,8 +418,8 @@ class WebHost:
 
         headers, body = self.unpack_body_and_headers(request_lines)
 
-        print("Headers:", headers)
-        print("Body:", body)
+        self.__debug_print("Headers:", headers)
+        self.__debug_print("Body:", body)
         if method == 'GET' and params.get('action') == 'read':
             self.read_payload(client_socket)
         elif method == 'POST' and params.get('action') == 'write':
@@ -279,13 +433,13 @@ class WebHost:
             path, _, query = url.partition('?')
             headers, body = self.unpack_body_and_headers(request_lines)
 
-            print("Headers:", headers)
-            print("Body:", body)
+            self.__debug_print("Headers:", headers)
+            self.__debug_print("Body:", body)
             
             if method == 'POST':
                 try:
                     config_updates = json.loads(body)
-                    valid_fields = {"IP", "SSID", "PASSW", "AP", "MODE"}
+                    valid_fields = {"IP", "SSID", "PASSW", "AP", "MODE", "WEB_PASSWD"}
                     if not all(field in valid_fields for field in config_updates.keys()):
                         response = "HTTP/1.1 400 Bad Request\r\n\r\nInvalid field in request body."
                     else:
@@ -304,7 +458,7 @@ class WebHost:
             print(f"Exception in handle_edit_config: {e}")
             response = f"HTTP/1.1 500 Internal Server Error\r\n\r\n{str(e)}"
             self.send_with_retry(client_socket, response)
- 
+     
     def read_payload(self, client_socket, folder="atoms", name="payload"):
         try:
             with open(f'/{folder}/{name}.txt', 'r') as f:
@@ -325,8 +479,32 @@ class WebHost:
             response = f"HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nError writing payload: {str(e)}"
         self.send_with_retry(client_socket, response.encode())
 
-    def run_web_loop(self): 
-            while True:
-                client_socket, addr = self.server_socket.accept()
-                print("Client connected from", addr)
-                self.handle_request(client_socket)
+    def _accept_and_handle(self, listener):
+        """Accept a connection and serve it."""
+        gc.collect()  # reclaim garbage before the (possibly TLS) handshake allocates much memory
+        # if TLS, handshake happens here, which can fail
+        try:
+            client_socket, addr = listener.accept()
+        except Exception as e:
+            print("Accept failed:", repr(e))
+            return
+        print("Client connected from", addr)
+        self.handle_request(client_socket)
+
+    def run_web_loop(self):
+        # CircuitPython's poll() returns the registered objects, not fds
+        self._listeners = [self.server_socket]
+        if self.tls_socket is not None:
+            self._listeners.append(self.tls_socket)
+
+        poller = select.poll()
+        for listener in self._listeners:
+            poller.register(listener, select.POLLIN)
+
+        while True:
+            for listener, _ in poller.poll():
+                self._accept_and_handle(listener)
+
+    def __debug_print(self, *args, **kwargs):
+        if self.log_requests:
+            print(*args, **kwargs)

@@ -345,6 +345,35 @@ Connecting Atom Ducky to your network will result in different IP address assign
 
 ![image](https://github.com/FLOCK4H/AtomDucky/assets/161654571/148595d0-ba67-4a85-83e4-6a886d151db3)
 
+## HTTPS / TLS support
+
+Atom Ducky automatically enables an HTTPS listener on TCP port **443**
+when it finds a certificate and a private key on the device.
+
+1. Place your certificate and key (both **PEM**, unencrypted key) next to the config file:
+  - `/atoms/cert.pem`
+  - `/atoms/key.pem`
+2. Press RESET button once, or plug the device again.
+3. If both files are present, the device serves **both**:
+  - `http://<ip>` on port 80 (unchanged)
+  - `https://<ip>` on port 443
+
+If either file is missing, invalid, or TLS fails to start,
+the device logs the error and keeps serving plain HTTP on port 80.
+
+Generate a self-signed certificate (replace `<ip>` with the device IP or hostname, e.g. `10.0.0.15`):
+
+```
+openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes \
+  -subj "/CN=<ip>" -addext "subjectAltName=IP:<ip>"
+```
+
+> [!NOTE]
+> - Browsers will warn about the self-signed certificate - accept the risk to continue.
+> - TLS 1.2 is supported on all builds; TLS 1.3 is negotiated automatically on newer CircuitPython builds (mbedTLS 4.x).
+
+If Atom Ducky crashes when accessed via HTTPS the available RAM might not be sufficient. Switch to the `AtomDucky_no_ble` version to free up the memory used by the BLE functionality.
+
 # Usage
 
 After plugging the Atom Ducky into a device supporting HID (computer, smartphone etc.), we want to open the web interface (open web browser and go to the IP address of Atom Ducky).
