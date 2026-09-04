@@ -14,6 +14,10 @@ from atoms.atomble import sour_apple, samsung_ble_spam
 from atoms.buttons import button, pixel
 from atoms.colors import color
 
+EAGAIN_BLOCK_TIME = 0.01
+"seconds to wait when socket would block"
+
+
 def button_pressed():
     return button.value
 
@@ -135,9 +139,10 @@ class WebHost:
                 data = data[sent:]
             except OSError as e:
                 if e.errno == errno.EAGAIN:
+                    # socket blocks, wait a bit and retry
+                    time.sleep(EAGAIN_BLOCK_TIME)
                     continue
-                else:
-                    raise
+                raise
     
     def read_full_request(self, client_socket):
         buf = bytearray(1024)
@@ -147,7 +152,14 @@ class WebHost:
         body_bytes_read = 0
 
         while True:
-            received = client_socket.recv_into(buf)
+            try:
+                received = client_socket.recv_into(buf)
+            except OSError as e:
+                if e.errno == errno.EAGAIN:
+                    # socket blocks, wait a bit and retry
+                    time.sleep(EAGAIN_BLOCK_TIME)
+                    continue
+                raise
             if received == 0:
                 break
             request_bytes.extend(buf[:received])
