@@ -17,7 +17,8 @@ MODE={self.mode}
 AP={self.ap}
 WEB_PASSWD={self.web_passwd}
 """)
-                print("Successfully saved the config!")
+                f.flush()
+            print("Successfully saved the config!")
         except Exception as e:
             print("Error when writing to _config!", str(e))
 
@@ -28,6 +29,7 @@ WEB_PASSWD={self.web_passwd}
                 return data
         except Exception as e:
             print("Error when reading _config!", str(e))
+            return ""
 
     def edit_config(self, **kwargs):
         current_config = self.read_config()
