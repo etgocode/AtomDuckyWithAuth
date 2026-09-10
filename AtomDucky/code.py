@@ -15,13 +15,14 @@ from atoms.colors import color
 pixel.fill(color("yellow"))
 
 class AP:
-    def __init__(self, ssid="Atom Ducky", passw="", ap='TRUE', ip="10.0.0.15", mode="NORMAL", web_passwd=""):
+    def __init__(self, ssid="Atom Ducky", passw="", ap='TRUE', ip="10.0.0.15", mode="NORMAL", web_passwd="", ble_enabled="TRUE"):
         self.ssid = ssid
         self.password = passw
         self.ip = ip
         self.ap = ap
         self.mode = mode
         self.web_passwd = web_passwd
+        self.ble_enabled = ble_enabled
         self.config = ConfigMan()
         self.run()
         
@@ -40,6 +41,8 @@ class AP:
                 self.ap = value
             elif key == 'WEB_PASSWD':
                 self.web_passwd = value
+            elif key == 'BLE_ENABLED':
+                self.ble_enabled = value
     
     def run(self):
         try:
@@ -54,6 +57,7 @@ SSID: {self.ssid}
 PASSW: {len(self.password) * '*'}
 MODE: {self.mode}
 AP: {self.ap}
+BLE_ENABLED: {self.ble_enabled}
 """)
         except OSError:
             print("You probably need to enable read/write permissions, copy Atom Ducky's boot.py to your drive and press RESET!")
@@ -67,13 +71,13 @@ AP: {self.ap}
             self.start_host_ap()
 
         if not cfg_exists:
-            self.config = ConfigMan(ip=self.ip, ssid=self.ssid, passw=self.password, mode=self.mode, ap=self.ap, web_passwd=self.web_passwd)
+            self.config = ConfigMan(ip=self.ip, ssid=self.ssid, passw=self.password, mode=self.mode, ap=self.ap, web_passwd=self.web_passwd, ble_enabled=self.ble_enabled)
             self.config.write_config()
 
         self.config.edit_config(ip=self.ip)
         print(f"Changed the _config IP to: {self.ip}")
 
-        webserver = WebHost(ip=self.ip, port=80, web_passwd=self.web_passwd)
+        webserver = WebHost(ip=self.ip, port=80, web_passwd=self.web_passwd, ble_enabled=ConfigMan.str_to_bool(self.ble_enabled))
     
     def rubber_mode_exec(self):
         if self.mode == "RUBBER":
