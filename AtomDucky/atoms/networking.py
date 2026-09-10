@@ -12,9 +12,12 @@ import ssl
 
 from atoms.hid import AtomDucky, load_payload_from_file
 from atoms.config_man import ConfigMan
-from atoms.atomble import sour_apple, samsung_ble_spam
 from atoms.buttons import button, pixel
 from atoms.colors import color
+
+# Conditionally import BLE functions
+sour_apple = None
+samsung_ble_spam = None
 
 EAGAIN_BLOCK_TIME = 0.01
 "seconds to wait when socket would block"
@@ -34,10 +37,19 @@ def button_pressed():
     return button.value
 
 class WebHost:
-    def __init__(self, ip, port, web_passwd):
+    def __init__(self, ip, port, web_passwd, ble_enabled=True):
         self.port = port
         self.ip = ip
         self.config = ConfigMan()
+        self.ble_enabled = ble_enabled
+        
+        # Conditionally import BLE functions if BLE is enabled
+        global sour_apple, samsung_ble_spam
+        if self.ble_enabled:
+            from atoms.atomble import sour_apple as sa, samsung_ble_spam as sbs
+            sour_apple = sa
+            samsung_ble_spam = sbs
+        
         """variables for session authentication"""
         self.tokens = set()
         self.web_passwd = web_passwd or None
@@ -250,7 +262,6 @@ class WebHost:
             
             endpoint_handlers = {
                 "/modify_payload": self.handle_modify_payload,
-                "/handle_ble": self.handle_ble_callbacks,
                 "/file_manager": self.handle_file_manager,
                 "/single_payload": self.handle_single_payload,
                 "/ret_templates": self.handle_ret_templates,
@@ -259,6 +270,10 @@ class WebHost:
                 "/inject": self.handle_inject,
                 "/auth": self._handle_auth,
             }
+            
+            # Only add BLE handler if BLE is enabled
+            if self.ble_enabled:
+                endpoint_handlers["/handle_ble"] = self.handle_ble_callbacks
 
             handler = None
             for ep, h in endpoint_handlers.items():

@@ -1,4 +1,9 @@
 class ConfigMan:
+    @staticmethod
+    def str_to_bool(value):
+        """Convert string 'TRUE'/'FALSE' to boolean."""
+        return value.upper() == 'TRUE' if isinstance(value, str) else bool(value)
+    
     def __init__(self, **kwargs):
         self.ip = kwargs.get('ip', '10.0.0.15')
         self.ssid = kwargs.get('ssid', 'Atom Ducky')
@@ -6,6 +11,7 @@ class ConfigMan:
         self.mode = kwargs.get('mode', 'NORMAL')
         self.ap = kwargs.get('ap', 'TRUE')
         self.web_passwd = kwargs.get('web_passwd', '')
+        self.ble_enabled = self.str_to_bool(kwargs.get('ble_enabled', 'TRUE'))
 
     def write_config(self):
         try:
@@ -16,6 +22,7 @@ PASSW={self.passw}
 MODE={self.mode}
 AP={self.ap}
 WEB_PASSWD={self.web_passwd}
+BLE_ENABLED={'TRUE' if self.ble_enabled else 'FALSE'}
 """)
                 f.flush()
             print("Successfully saved the config!")
@@ -50,5 +57,6 @@ WEB_PASSWD={self.web_passwd}
         self.mode = config_dict.get('MODE', self.mode)
         self.ap = config_dict.get('AP', self.ap)
         self.web_passwd = config_dict.get('WEB_PASSWD', self.web_passwd)
+        self.ble_enabled = self.str_to_bool(config_dict.get('BLE_ENABLED', 'TRUE' if self.ble_enabled else 'FALSE'))
         self.write_config()
         print("Successfully modified the config!")

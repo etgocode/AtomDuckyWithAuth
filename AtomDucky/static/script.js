@@ -5,18 +5,24 @@ let SSID = '';
 let PASSW = '';
 let AP = '';
 let WEB_PASSWD = '';
+let BLE_ENABLED = true;
 let retryCount = 3;
 let currentTemplate = '';
 
+function strToBool(value) {
+    return value.toUpperCase() === 'TRUE';
+}
+
 let currentIndex = 0;
-let setupData = {"IP": '', "SSID": '', "PASSW": '', "MODE": "", "AP": "", "WEB_PASSWD": ''};
+let setupData = {"IP": '', "SSID": '', "PASSW": '', "MODE": "", "AP": "", "WEB_PASSWD": '', "BLE_ENABLED": ''};
 let setupDataItems = {
     "IP": "10.0.0.15", 
     "SSID": "Atom Ducky", 
     "Password": '', 
     "Device Mode": 'NORMAL', 
     "Access Point Mode": 'TRUE',
-	"Web-UI Password": ''
+	"Web-UI Password": '',
+	"Enable BLE": 'TRUE'
 };
 
 let settingsDefaults = {
@@ -25,7 +31,8 @@ let settingsDefaults = {
     "Password": PASSW, 
     "Device Mode": MODE, 
     "Access Point Mode": AP,
-	"Web-UI Password": WEB_PASSWD
+	"Web-UI Password": WEB_PASSWD,
+	"Enable BLE": BLE_ENABLED
 };
 
 const setupKeys = Object.keys(setupData);
@@ -57,6 +64,9 @@ async function readConfig() {
 			if (key === 'WEB_PASSWD') {
 				WEB_PASSWD = value.trim();
 			}
+			if (key === 'BLE_ENABLED') {
+				BLE_ENABLED = strToBool(value.trim());
+			}
         }
 
         // Update settingsDefaults with the values from the config
@@ -66,8 +76,12 @@ async function readConfig() {
             "Password": PASSW, 
             "Device Mode": MODE, 
             "Access Point Mode": AP,
-			"Web-UI Password": WEB_PASSWD
+			"Web-UI Password": WEB_PASSWD,
+			"Enable BLE": BLE_ENABLED ? 'TRUE' : 'FALSE'
         };
+
+        // Hide BLE elements if BLE is disabled
+        hideBLEIfDisabled();
 
         // Call createSettingsRows after readConfig has populated the config values
         createSettingsRows();
@@ -177,7 +191,27 @@ function toggleMenu() {
     menu.classList.toggle("show");
 }
 
+function hideBLEIfDisabled() {
+    if (BLE_ENABLED) {
+        return;
+    }
+    const bleNav = document.getElementById('bleNav');
+    const bleContent = document.getElementById('bleContent');
+    if (bleNav) bleNav.style.display = 'none';
+    if (bleContent) bleContent.style.display = 'none';
+    // Switch to HID if currently on BLE
+    if (currentNav === 'BLE') {
+        currentNav = 'HID';
+        updateCardContent();
+    }
+}
+
 function setNav(nav) {
+    // Prevent navigation to BLE if disabled
+    if (nav === 'BLE' && !BLE_ENABLED) {
+        console.warn('BLE is disabled via BLE_ENABLED configuration');
+        return;
+    }
     currentNav = nav;
     updateCardContent();
 }
@@ -663,6 +697,10 @@ function bindButtons() {
 }
 
 function startSourApple() {
+    if (!BLE_ENABLED) {
+        alert('BLE is disabled via configuration (BLE_ENABLED=FALSE)');
+        return;
+    }
     alert(`Green LED will light up when the attack is running. Press the button until it turns Yellow to stop.`)
     function sendReq() {
         fetch('/handle_ble', {
@@ -692,6 +730,10 @@ function startSourApple() {
 }
 
 function startSamsungSpam() {
+    if (!BLE_ENABLED) {
+        alert('BLE is disabled via configuration (BLE_ENABLED=FALSE)');
+        return;
+    }
     alert(`Green LED will light up when the attack is running. Press the button until it turns Yellow to stop.`)
     function sendReq() {
         fetch('/handle_ble', {
